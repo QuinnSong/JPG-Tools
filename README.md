@@ -16,7 +16,7 @@ Windows Vista and above
 - Download link:
 http://www.imagemagick.org/script/download.php
 
-1) Set a new system environment vaiable "MAGICK_HOME", pointing to:
+1) Set a new system environment variable "MAGICK_HOME", pointing to:
 (e.g.)
 C:\Program Files (x86)\ImageMagick-6.8.9-Q16
 2) To take effect, you may need to reboot your system 
