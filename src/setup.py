@@ -32,7 +32,7 @@ setup(
     name=u'Jpg图片工具',
     description=u"查看缩放裁剪等功能的图片工具",
     version=u'0.93',
-    author=u'MIDI@CCF',
+    author=u'Quinn Song',
     
     options={'build_exe' : opts},
     executables=[WIN_Target]

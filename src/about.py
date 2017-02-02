@@ -31,7 +31,7 @@ class MyAboutDialog ( wx.Dialog ):
 		self.m_staticTextVersion.Wrap( -1 )
 		bSizerDescription.Add( self.m_staticTextVersion, 0, wx.ALL, 5 )
 		
-		self.m_staticTextAuthor = wx.StaticText( self, wx.ID_ANY, u"联系作者：MIDI@CCF 47396280（QQ）", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_staticTextAuthor = wx.StaticText( self, wx.ID_ANY, u"联系作者：Quinn Song | 47396280（QQ）", wx.DefaultPosition, wx.DefaultSize, 0 )
 		self.m_staticTextAuthor.Wrap( -1 )
 		bSizerDescription.Add( self.m_staticTextAuthor, 0, wx.ALL, 5 )
 		
