@@ -16,7 +16,7 @@ Windows Vista and above
 1. ImageMagick v6.8.9 or higher. [Download link](http://www.imagemagick.org/script/download.php)
 
 2. Set a new system environment variable "MAGICK_HOME", pointing to:
-e.g. C:\Program Files (x86)\ImageMagick-6.8.9-Q16
+e.g. `"C:\Program Files (x86)\ImageMagick-6.8.9-Q16"`
 
 3. To take effect, you may need to reboot your system 
 
