@@ -35,7 +35,7 @@ try:
         from QRDlg import MyQRDialog
         from qrtools import QR
 except ImportError:
-        HAS_WAND = False
+	HAS_WAND = False
 # ===== end of try ========================
 
 from PIL.PngImagePlugin import PngImageFile
