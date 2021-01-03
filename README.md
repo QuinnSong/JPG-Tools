@@ -60,7 +60,7 @@ and more ...
 
 > wordcloud-1.6.0-cp27-cp27m-win32.whl
 
-Install packages using pip (or: pip install -r requirements.txt)
+3. Install packages using pip (or: pip install -r requirements.txt)
 
 > pip install WMI==1.5.1 		## will install pywin32
 
