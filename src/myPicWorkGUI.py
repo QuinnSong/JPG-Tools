@@ -39,27 +39,30 @@ from img_mosaic import mosaic
 from blendOrMask import AddMask, blend
 from split import split
 from slice_gone import slice_gone
+from word_cloud import generate_word_cloud
 import iconfile
 import numpy as np
 import _winreg
 from openpyxl import load_workbook, workbook, worksheet
 from openpyxl.utils.exceptions import InvalidFileException
 import math
+import re
 
 COLOR_FORMAT_TIP = u"手动输入时，请按照格式：\r\n(192, 192, 192, 255) 或者 #FF3CD2\r\n另外，您也可以先用鼠标点击该文本框，然后再点击图片完成取色"
 BACKGROUND_TIP = u'打开背景设置\r\n为透明图片添加背景'
 PUZZLE_TIP = u"打开拼图设置\r\n将大小相同的图片拼在一起"
 SPLIT_TIP = u"打开图片分割设置\r\n将当前图片分割成大小相同的图片。\r\n注意：如果添加该任务，它将最后一个执行"
 FOCUS_TIP = u'打开聚光设置\r\n提示：内圈和外圈半径是相对于图片内圆而言'
-TEAR_TIP = u"打开锯齿设置\r\n在指定方向生成锯齿效果。"
+TEAR_TIP = u"打开锯齿设置\r\n在指定方向生成锯齿效果"
 REPLACE_TIP = u"打开颜色替换设置\r\n将图片中满足条件的一种颜色用另一种来替换"
 SPLIT_LINE_COLOR_TIP = u"预览时的分割线颜色"
 SLICE_TIP = u"请首先将需要去除的中间部分，用鼠标选中。可以进行上下或左右拼接"
+WORDCLOUD_TIP = u"打开词云设置\r\n按要求生成词云效果"
 
-wildcard = "所有文件 (*.*) | *.*|" \
-	"JPG 图片 (*.jpg) | *.jpg|" \
-	"BMP 图片 (*.bmp) | *.bmp|" \
-	"PNG 图片 (*.png) | *.png"
+wildcard = u"所有文件 (*.*) | *.*|" + \
+	u"JPG 图片 (*.jpg) | *.jpg|" + \
+	u"BMP 图片 (*.bmp) | *.bmp|" + \
+	u"PNG 图片 (*.png) | *.png"
 
 ###########################################################################
 ## Class MyJPGWorkDlg
@@ -69,9 +72,11 @@ class MyJPGWorkDlg ( wx.Dialog ):
 	
 	def __init__( self, parent ):
 		wx.Dialog.__init__ ( self, parent, id = wx.ID_ANY, title = u"图片特效", pos = wx.DefaultPosition,
-				    size = wx.Size( 570, 820 ), style = wx.DEFAULT_DIALOG_STYLE |wx.MINIMIZE_BOX | wx.TE_PROCESS_ENTER )				
+				    size = wx.Size( 570, 750 ), style = wx.DEFAULT_DIALOG_STYLE |wx.MINIMIZE_BOX | wx.TE_PROCESS_ENTER )				
 		self.parent = parent
 		self.list_view_dlg = None
+		self.fonts_view_dlg = None
+		self.words_view_dlg = None
 		self.SetIcon(self.parent.midi)	
 		self.ctrlOnFocus = None
 		self.settingCounts = 0
@@ -101,7 +106,7 @@ class MyJPGWorkDlg ( wx.Dialog ):
 				   u"倾斜效果": self.MakeShear, u"马赛克": self.MakeMosaic, \
 				   u"蒙版效果": self.AddMask, u"混合效果": self.MakeBlend, \
 				   u"水印效果": self.MakeWaterMark, u"图片分割": self.MakeSplit, \
-				   u"中间去除": self.SliceGone }
+				   u"中间去除": self.SliceGone, u"词云效果": self.MakeWordCloud }
 		
 		bSizer1 = wx.BoxSizer( wx.HORIZONTAL )
 		
@@ -113,7 +118,7 @@ class MyJPGWorkDlg ( wx.Dialog ):
 		bSizerTaskSub = wx.BoxSizer( wx.HORIZONTAL )            
 		sbSizerTaskList = wx.StaticBoxSizer( wx.StaticBox( self.m_panel1, wx.ID_ANY, u"任务列表排序" ), wx.VERTICAL )         
 		self.m_checkList1Choices = []
-		self.m_checkList1 = wx.ListBox( self.m_panel1, wx.ID_ANY, wx.DefaultPosition, wx.Size( 440,200 ), self.m_checkList1Choices, wx.LB_NEEDED_SB|wx.LB_SINGLE )
+		self.m_checkList1 = wx.ListBox( self.m_panel1, wx.ID_ANY, wx.DefaultPosition, wx.Size( 440,130 ), self.m_checkList1Choices, wx.LB_NEEDED_SB|wx.LB_SINGLE )
 		sbSizerTaskList.Add( self.m_checkList1, 0, wx.ALL|wx.EXPAND, 5 )
 		self.m_checkList1.Bind(wx.EVT_LISTBOX, self.KeyDown)
 		self.m_checkList1.SetToolTipString(u'点击"+" 按钮添加效果到列表')            
@@ -138,7 +143,7 @@ class MyJPGWorkDlg ( wx.Dialog ):
 		self.m_btnDown.SetToolTipString(u'下移')		
 		
 		bSizerTask.Add( bSizerUpDown, 1, wx.EXPAND, 5 )
-		bSizerMain.Add( bSizerTask, 1, wx.EXPAND, 5 )
+		bSizerMain.Add( bSizerTask, 0, wx.EXPAND, 5 )
 		
 		# Create a panel for all available effects ---------------              
 		sbSizerTaskPanel = wx.StaticBoxSizer( wx.StaticBox( self.m_panel1, wx.ID_ANY, u"可选效果"), wx.VERTICAL )
@@ -299,7 +304,12 @@ class MyJPGWorkDlg ( wx.Dialog ):
 		
 		self.m_buttonSlice = wx.ToggleButton( self.m_panel1, wx.ID_ANY, u"中间去除", wx.DefaultPosition, wx.DefaultSize, wx.BU_EXACTFIT )
 		sbSizerTaskPanel_7.Add( self.m_buttonSlice, 0, wx.ALL, 5 )
-		self.m_buttonSlice.SetToolTipString(SLICE_TIP) 
+		self.m_buttonSlice.SetToolTipString(SLICE_TIP)	
+		
+		# 词云
+		self.m_buttonWordCloud = wx.ToggleButton( self.m_panel1, wx.ID_ANY, u"词云效果", wx.DefaultPosition, wx.DefaultSize, wx.BU_EXACTFIT )
+		sbSizerTaskPanel_7.Add( self.m_buttonWordCloud, 0, wx.ALL, 5 )
+		self.m_buttonWordCloud.SetToolTipString(WORDCLOUD_TIP)
 		
 		self.m_bpButtonPlus = wx.Button( self.m_panel1, wx.ID_ANY, "+", wx.DefaultPosition, wx.DefaultSize, wx.BU_EXACTFIT )		
 		sbSizerTaskPanel_7.Add( self.m_bpButtonPlus, 0, wx.ALL, 5 )
@@ -321,9 +331,10 @@ class MyJPGWorkDlg ( wx.Dialog ):
 					 self.m_buttonDeYellow, self.m_buttonTan, self.m_buttonSwirl, self.m_buttonSpherize,
 					 self.m_buttonPuzzle, self.m_buttonCornerFold, self.m_buttonTear, self.m_buttonFade, self.m_buttonMix,
 					 self.m_buttonReplace, self.m_buttonAutoBrightness, self.m_buttonRoll, self.m_buttonShear, self.m_buttonMosaic,
-					 self.m_buttonMask, self.m_buttonBlend, self.m_buttonWaterMark, self.m_buttonSplit, self.m_buttonSlice ]
+					 self.m_buttonMask, self.m_buttonBlend, self.m_buttonWaterMark, self.m_buttonSplit, self.m_buttonSlice,
+					 self.m_buttonWordCloud]
 		
-		bSizerMain.Add( sbSizerTaskPanel, 1, wx.EXPAND, 0 )
+		bSizerMain.Add( sbSizerTaskPanel, 0, wx.EXPAND, 0 )
 		#---------------------panel ends ---------------------      
 		#------------setting for round corner starts-----------
 		bSizerSetting = wx.BoxSizer( wx.VERTICAL )
@@ -999,8 +1010,8 @@ class MyJPGWorkDlg ( wx.Dialog ):
 		self.ctrlNewColor.SetToolTipString(COLOR_FORMAT_TIP)
 		self.ctrlNewColor.Bind(wx.EVT_TEXT, self.OnNewTxtChanged)
 		
-		sbSizerStaticReplace.Add( sbSizerStaticRegion, 1, wx.EXPAND, 0 )
-		sbSizerStaticReplace.Add( sbSizerStaticColorReplace, 1, wx.EXPAND, 0 )
+		sbSizerStaticReplace.Add( sbSizerStaticRegion, 0, wx.EXPAND|wx.ALL, 0 )
+		sbSizerStaticReplace.Add( sbSizerStaticColorReplace, 0, wx.EXPAND|wx.ALL, 0 )
 		bSizerSetting.Add( sbSizerStaticReplace, 1, wx.EXPAND, 0 )
 		#--------------- Auto brightness starts ------------------------
 		self.staticAutoBrightness = wx.StaticBox( self.m_panel1, wx.ID_ANY, u"自动亮度设置" )
@@ -1104,7 +1115,7 @@ class MyJPGWorkDlg ( wx.Dialog ):
 		
 		self.m_btnMaskBrowse = wx.Button( self.m_panel1, wx.ID_ANY, u"...", wx.DefaultPosition, (-1, 21), wx.BU_EXACTFIT )
 		sbSizerStaticMask.Add( self.m_btnMaskBrowse, 0, wx.ALIGN_CENTER|wx.RIGHT, 5 )
-		self.m_btnMaskBrowse.SetToolTipString('要求指定的蒙版与当前图片大小相同；\r\n否则会引起缩放失真。')
+		self.m_btnMaskBrowse.SetToolTipString(u'要求指定的蒙版与当前图片大小相同；\r\n否则会引起缩放失真。')
 		
 		self.m_staticTextMaskBg = wx.StaticText( self.m_panel1, wx.ID_ANY, u"背景颜色", wx.DefaultPosition, wx.DefaultSize, 0 )
 		sbSizerStaticMask.Add( self.m_staticTextMaskBg, 0, wx.ALIGN_CENTER|wx.LEFT, 5 )
@@ -1133,7 +1144,7 @@ class MyJPGWorkDlg ( wx.Dialog ):
 		
 		self.m_btnBlendBrowse = wx.Button( self.m_panel1, wx.ID_ANY, u"...", wx.DefaultPosition, (-1, 21), wx.BU_EXACTFIT )
 		sbSizerStaticBlend.Add( self.m_btnBlendBrowse, 0, wx.ALIGN_CENTER|wx.RIGHT, 5 )
-		self.m_btnBlendBrowse.SetToolTipString('要求指定的图片与当前图片大小相同；\r\n否则会引起缩放失真。')
+		self.m_btnBlendBrowse.SetToolTipString(u'要求指定的图片与当前图片大小相同；\r\n否则会引起缩放失真。')
 		
 		sbSizerStaticBlend.AddSpacer( ( 10, 0) )
 		
@@ -1206,6 +1217,123 @@ class MyJPGWorkDlg ( wx.Dialog ):
 		self.m_staticSliceModeTip.Enable( False )
 		sbSizerStaticSliceGone.Add( self.m_staticSliceModeTip, 0, wx.ALIGN_CENTER|wx.ALL, 5 )
 		bSizerSetting.Add( sbSizerStaticSliceGone, 1, wx.EXPAND, 0 )
+		
+		#-------------- word cloud starts -------------------------
+		self.staticWordCloud = wx.StaticBox( self.m_panel1, wx.ID_ANY, u"词云设置" )
+		sbSizerWordCloud = wx.StaticBoxSizer( self.staticWordCloud, wx.VERTICAL )
+
+		bSizerWordbg = wx.BoxSizer( wx.HORIZONTAL )
+
+		self.m_staticTextWordbg = wx.StaticText( self.m_panel1, wx.ID_ANY, u"使用", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_staticTextWordbg.Wrap( -1 )
+
+		bSizerWordbg.Add( self.m_staticTextWordbg, 0, wx.ALIGN_CENTER|wx.LEFT, 5 )
+
+		m_choiceBgColorChoices = [ u"透明背景颜色", u"指定背景颜色" ]
+		self.m_choiceBgColor = wx.Choice( self.m_panel1, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, m_choiceBgColorChoices, 0 )
+		self.m_choiceBgColor.SetSelection( 1 )
+		bSizerWordbg.Add( self.m_choiceBgColor, 0, wx.ALIGN_CENTER|wx.LEFT, 5 )
+
+		self.m_colourPickerWordBgColor = wx.ColourPickerCtrl( self.m_panel1, wx.ID_ANY, wx.WHITE, wx.DefaultPosition, wx.Size( 50,12 ), wx.CLRP_DEFAULT_STYLE)
+		bSizerWordbg.Add( self.m_colourPickerWordBgColor, 0, wx.ALIGN_CENTER|wx.LEFT, 5 )
+
+		self.m_textCtrlWordbg = wx.TextCtrl( self.m_panel1, wx.ID_ANY, '(255, 255, 255, 255)', wx.DefaultPosition, wx.DefaultSize, 0 )
+
+		bSizerWordbg.Add( self.m_textCtrlWordbg, 0, wx.ALIGN_CENTER|wx.LEFT, 5 )
+
+		bSizerWordbg.Add( ( 0, 0), 1, wx.EXPAND, 5 )
+
+		self.m_staticTextCustomWords = wx.StaticText( self.m_panel1, wx.ID_ANY, u"加载词库", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_staticTextCustomWords.Wrap( -1 )
+
+		bSizerWordbg.Add( self.m_staticTextCustomWords, 0, wx.ALIGN_CENTER|wx.RIGHT|wx.LEFT, 5 )
+
+		self.m_bpButtonCustomWords = wx.BitmapButton( self.m_panel1, wx.ID_ANY, wx.NullBitmap, wx.DefaultPosition, wx.DefaultSize, wx.NO_BORDER |wx.BU_EXACTFIT )
+		self.m_bpButtonCustomWords.SetBitmap(wx.ArtProvider.GetBitmap(wx.ART_LIST_VIEW, ))
+		bSizerWordbg.Add( self.m_bpButtonCustomWords, 0, wx.ALIGN_CENTER|wx.RIGHT, 5 )
+		self.wc_words = None
+		self.wc_custom_stops = None
+		
+		self.m_staticTextWordsStatus = wx.StaticText( self.m_panel1, wx.ID_ANY, u"尚未加载", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_staticTextWordsStatus.Wrap(-1)
+		self.m_staticTextWordsStatus.SetForegroundColour((255,0,0))
+		bSizerWordbg.Add( self.m_staticTextWordsStatus, 0, wx.ALIGN_CENTER|wx.RIGHT, 5 )
+
+		sbSizerWordCloud.Add( bSizerWordbg, 0, wx.EXPAND|wx.ALL, 5 )
+
+		bSizerWordColor = wx.BoxSizer( wx.HORIZONTAL )
+
+		self.m_staticTextUseWordColor = wx.StaticText( self.m_panel1, wx.ID_ANY, u"使用", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_staticTextUseWordColor.Wrap( -1 )
+
+		bSizerWordColor.Add( self.m_staticTextUseWordColor, 0, wx.ALIGN_CENTER|wx.LEFT, 5 )
+
+		m_choiceUseWordColorChoices = [ u"默认字体颜色", u"指定字体颜色" ]
+		self.m_choiceUseWordColor = wx.Choice( self.m_panel1, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, m_choiceUseWordColorChoices, 0 )
+		self.m_choiceUseWordColor.SetSelection( 1 )
+		bSizerWordColor.Add( self.m_choiceUseWordColor, 0, wx.ALIGN_CENTER|wx.LEFT, 5 )
+
+		self.m_colourPickerUseWordColor = wx.ColourPickerCtrl( self.m_panel1, wx.ID_ANY, wx.WHITE, wx.DefaultPosition, wx.Size( 50,12 ), wx.CLRP_DEFAULT_STYLE)
+		bSizerWordColor.Add( self.m_colourPickerUseWordColor, 0, wx.ALIGN_CENTER|wx.LEFT, 5 )
+
+		self.m_textCtrlUseWordColor = wx.TextCtrl( self.m_panel1, wx.ID_ANY, '(255, 255, 255, 255)', wx.DefaultPosition, wx.DefaultSize, 0 )
+
+		bSizerWordColor.Add( self.m_textCtrlUseWordColor, 0, wx.ALIGN_CENTER|wx.LEFT, 5 )
+
+		self.m_checkBoxAddRandomColor = wx.CheckBox( self.m_panel1, wx.ID_ANY, u"添加渲染", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_checkBoxAddRandomColor.SetValue(True)
+		bSizerWordColor.Add( self.m_checkBoxAddRandomColor, 0, wx.ALIGN_CENTER|wx.LEFT, 5 )
+
+
+		bSizerWordColor.Add( ( 0, 0), 1, wx.EXPAND, 5 )
+
+		m_choiceUseDefaultFontChoices = [ u"默认字体", u"指定字体" ]
+		self.m_choiceUseDefaultFont = wx.Choice( self.m_panel1, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, m_choiceUseDefaultFontChoices, 0 )
+		self.m_choiceUseDefaultFont.SetSelection( 0 )
+		bSizerWordColor.Add( self.m_choiceUseDefaultFont, 0, wx.ALIGN_CENTER|wx.LEFT, 5 )
+		self.wc_use_default_font = True
+		self.wc_font_path = None
+
+		#self.m_fontPickerUseFont = wx.FontPickerCtrl( self.m_panel1, wx.ID_ANY, wx.NullFont, wx.DefaultPosition, wx.DefaultSize, wx.FNTP_DEFAULT_STYLE )
+		#self.m_fontPickerUseFont.SetMaxPointSize( 100 )
+		#self.m_fontPickerUseFont.Enable( False )
+		#
+		#bSizerWordColor.Add( self.m_fontPickerUseFont, 0, wx.ALL, 5 )
+
+
+		sbSizerWordCloud.Add( bSizerWordColor, 0, wx.EXPAND|wx.ALL, 5 )
+
+		bSizerWordOther = wx.BoxSizer( wx.HORIZONTAL )
+
+		m_choiceUseMaskChoices = [ u"不使用蒙板", u"使用当前图片为模板", u"自定义蒙板" ]
+		self.m_choiceUseMask = wx.Choice( self.m_panel1, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, m_choiceUseMaskChoices, 0 )
+		self.m_choiceUseMask.SetSelection( 2 )
+		bSizerWordOther.Add( self.m_choiceUseMask, 0, wx.ALIGN_CENTER|wx.LEFT, 5 )
+
+		self.m_filePickerMaskFile = wx.FilePickerCtrl( self.m_panel1, wx.ID_ANY, wx.EmptyString, u"请选择一张蒙版图片", u"*.*", wx.DefaultPosition, wx.DefaultSize, wx.FLP_DEFAULT_STYLE|wx.FLP_SMALL )
+		bSizerWordOther.Add( self.m_filePickerMaskFile, 3, wx.ALIGN_CENTER|wx.LEFT, 5 )
+		self.wc_mask = None
+
+		bSizerWordOther.Add( ( 0, 0), 1, wx.EXPAND, 5 )
+
+		self.m_checkBoxAllowNumber = wx.CheckBox( self.m_panel1, wx.ID_ANY, u"允许数字", wx.DefaultPosition, wx.DefaultSize, 0 )
+		bSizerWordOther.Add( self.m_checkBoxAllowNumber, 0, wx.ALIGN_CENTER|wx.RIGHT, 5 )
+
+
+		bSizerWordOther.Add( ( 0, 0), 1, wx.EXPAND, 5 )
+
+		self.m_staticTextWordScale = wx.StaticText( self.m_panel1, wx.ID_ANY, u"缩放比例", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_staticTextWordScale.Wrap( -1 )
+
+		bSizerWordOther.Add( self.m_staticTextWordScale, 0, wx.ALIGN_CENTER|wx.RIGHT, 5 )
+
+		self.m_spinCtrlWordScale = wx.SpinCtrl( self.m_panel1, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.Size( 80,-1 ), wx.ALIGN_LEFT|wx.SP_ARROW_KEYS, 1, 8, 4 )
+		bSizerWordOther.Add( self.m_spinCtrlWordScale, 0, wx.ALIGN_CENTER|wx.RIGHT, 5 )
+
+
+		sbSizerWordCloud.Add( bSizerWordOther, 0, wx.EXPAND|wx.ALL, 5 )
+		bSizerSetting.Add( sbSizerWordCloud, 1, wx.EXPAND, 5 )
+		#-------------- word cloud ends ---------------------------
 
 		#--------------the bottom buttons starts -------------------
 		bSizerMain.Add( bSizerSetting, 1, wx.EXPAND, 5 )
@@ -1237,6 +1365,7 @@ class MyJPGWorkDlg ( wx.Dialog ):
 		bSizerMain.Fit( self.m_panel1 )
 		bSizer1.Add( self.m_panel1, 1, wx.EXPAND |wx.ALL, 5 )
 
+		self.SetAutoLayout(True)
 		self.SetSizer( bSizer1 )                
 		self.Layout()           
 		self.Centre( wx.BOTH )
@@ -1304,7 +1433,21 @@ class MyJPGWorkDlg ( wx.Dialog ):
 		self.m_buttonWaterMark.Bind(wx.EVT_TOGGLEBUTTON, self.OnWaterMarkClick)
 		self.m_buttonSplit.Bind(wx.EVT_TOGGLEBUTTON, self.OnSplitClick)
 		self.m_buttonSlice.Bind(wx.EVT_TOGGLEBUTTON, self.OnSliceClick)
-		self.m_buttonListView.Bind( wx.EVT_BUTTON, self.OnListView )
+		self.m_buttonWordCloud.Bind(wx.EVT_TOGGLEBUTTON, self.OnWordCloudClick)
+		self.m_buttonListView.Bind(wx.EVT_BUTTON, self.OnListView )
+		# Word Cloud
+		self.m_choiceBgColor.Bind( wx.EVT_CHOICE, self.OnWordBgChoiceChanged )
+		self.m_colourPickerWordBgColor.Bind( wx.EVT_COLOURPICKER_CHANGED, self.OnWordBgColorChanged )
+		self.m_textCtrlWordbg.Bind( wx.EVT_TEXT, self.OnWordBgColorTextBoxChanged )
+		self.m_bpButtonCustomWords.Bind( wx.EVT_BUTTON, self.OpenWordViewDlg )
+		self.m_staticTextWordsStatus.Bind( wx.EVT_BUTTON, self.OpenWordViewDlg )
+		self.m_choiceUseWordColor.Bind( wx.EVT_CHOICE, self.OnWordFontColorChoiceChanged )
+		self.m_colourPickerUseWordColor.Bind( wx.EVT_COLOURPICKER_CHANGED, self.OnWordColorChanged )
+		self.m_textCtrlUseWordColor.Bind( wx.EVT_TEXT, self.OnWordFontTextBoxChanged )
+		self.m_choiceUseDefaultFont.Bind( wx.EVT_CHOICE, self.OnWordFontChoiceChanged )
+		#self.m_fontPickerUseFont.Bind( wx.EVT_FONTPICKER_CHANGED, self.OnWordFontChanged )
+		self.m_filePickerMaskFile.Bind( wx.EVT_FILEPICKER_CHANGED, self.OnWordFileMaskChanged )
+		self.m_choiceUseMask.Bind( wx.EVT_CHOICE, self.OnUseMaskChoiceChanged )
 		
 		#self.Bind (wx.EVT_LEAVE_WINDOW, self.OnLeave)
 		
@@ -1342,6 +1485,7 @@ class MyJPGWorkDlg ( wx.Dialog ):
 		self.toggleBlendPanel (False)
 		self.toggleSplitPanel (False)
 		self.toggleSlicePanel (False)
+		self.toggleWordCloudPanel(False)
 		
 		ctrl_focus_list = [self.ctrlOldColor, self.ctrlOldColorMax, self.ctrlNewColor, self.ctrlShearBkColor, self.ctrlMaskBgColor, self.ctrlColor ]
 		for ctrl in ctrl_focus_list: ctrl.Bind(wx.EVT_LEFT_DOWN, self.OnCtrlClick)
@@ -1416,7 +1560,7 @@ class MyJPGWorkDlg ( wx.Dialog ):
 		event.Skip()
 	def noOpenSetting(self, isPressed):
 		if isPressed and  self.settingCounts == 2:
-			wx.MessageBox("抱歉！达到了设置面板数打开的最大限制", "小提醒", wx.OK | wx.ICON_INFORMATION)                  
+			wx.MessageBox(u"抱歉！达到了设置面板数打开的最大限制", "小提醒", wx.OK | wx.ICON_INFORMATION)                  
 			return True
 		else:
 			return False
@@ -1446,7 +1590,11 @@ class MyJPGWorkDlg ( wx.Dialog ):
 		self.toggleSettingPanel (ctrl_list, isPressed)
 
 	def toggleSettingPanel(self, ctrl_list, isPressed):		
-		for ctrl in ctrl_list: ctrl.Show(isPressed)
+		for ctrl in ctrl_list:
+			if (ctrl is self.m_staticTextWordsStatus) and isPressed:
+				self.toggleWordsStatus()
+			else:
+				ctrl.Show(isPressed)
 		self.Layout()
 	
 	def OnBackgroundClick( self, event ):
@@ -1464,7 +1612,7 @@ class MyJPGWorkDlg ( wx.Dialog ):
 		self.OnSettingClick(event, self.toggleMosaicPanel, u'打开马赛克设置')
 		event.Skip()
 		
-	def	toggleMosaicPanel(self, isPressed):
+	def toggleMosaicPanel(self, isPressed):
 		#Mosaic
 		ctrl_list = [self.staticMosaic, self.m_staticTextMosaicSize, self.m_spinCtrlMosaicSize, self.m_staticTextMosaicTip ]
 		self.toggleSettingPanel (ctrl_list, isPressed)
@@ -1507,6 +1655,21 @@ class MyJPGWorkDlg ( wx.Dialog ):
 	def OnSliceClick (self, event ):
 		self.OnSettingClick(event, self.toggleSlicePanel, SLICE_TIP)
 		event.Skip()
+		
+	def OnWordCloudClick (self, event ):
+		self.OnSettingClick(event, self.toggleWordCloudPanel, WORDCLOUD_TIP)
+		event.Skip()
+		
+	def toggleWordCloudPanel (self, isPressed):
+		# Word Cloud
+		ctrl_list = [self.m_staticTextWordbg, self.m_choiceBgColor, self.m_colourPickerWordBgColor, self.m_textCtrlWordbg, self.m_staticTextCustomWords, self.m_bpButtonCustomWords, self.m_staticTextWordsStatus, \
+			     self.m_staticTextUseWordColor, self.m_choiceUseWordColor, self.m_colourPickerUseWordColor, self.m_textCtrlUseWordColor, self.m_checkBoxAddRandomColor, self.m_choiceUseDefaultFont, \
+			     self.m_choiceUseMask, self.m_filePickerMaskFile, self.m_checkBoxAllowNumber, self.m_staticTextWordScale, self.m_spinCtrlWordScale, self.staticWordCloud]
+		
+		self.toggleSettingPanel (ctrl_list, isPressed)
+		
+	def toggleWordsStatus(self):
+		self.m_staticTextWordsStatus.Show( bool(not self.wc_words)  )
 		
 	def toggleSplitPanel(self, isPressed):
 		#Mosaic
@@ -1839,7 +2002,7 @@ class MyJPGWorkDlg ( wx.Dialog ):
 				self.m_textCtrlMaskPath.SetToolTipString (path)
 				self.parent.mask_path = path	
 			except:
-				wx.MessageBox("抱歉！打开蒙版时出错，请再试。", "小提醒", wx.OK | wx.ICON_INFORMATION) 
+				wx.MessageBox(u"抱歉！打开蒙版图片时出错，请再试。", "小提醒", wx.OK | wx.ICON_INFORMATION) 
 		fd.Destroy()
 		event.Skip()
 		
@@ -1852,8 +2015,79 @@ class MyJPGWorkDlg ( wx.Dialog ):
 				self.m_textCtrlImg2Path.SetValue(path)
 				self.m_textCtrlImg2Path.SetToolTipString(path)
 			except:
-				wx.MessageBox("抱歉！打开图片时出错，请再试。", "小提醒", wx.OK | wx.ICON_INFORMATION)
+				wx.MessageBox(u"抱歉！打开图片时出错，请再试。", "小提醒", wx.OK | wx.ICON_INFORMATION)
 		fd.Destroy()
+		event.Skip()
+		
+	def OnWordBgChoiceChanged( self, event ):
+		flag = self.m_choiceBgColor.GetSelection() == 1
+		self.m_colourPickerWordBgColor.Show(flag)
+		self.m_textCtrlWordbg.Show(flag)
+		if event: event.Skip()
+
+	def OnWordBgColorChanged( self, event ):
+		self.colorPicker2Ctrl(self.m_colourPickerWordBgColor, self.m_textCtrlWordbg)
+		event.Skip()
+
+	def OnWordBgColorTextBoxChanged( self, event ):
+		self.ctrl2ColorPicker(self.m_textCtrlWordbg, self.m_colourPickerWordBgColor)
+		event.Skip()
+
+	def OnWordFontColorChoiceChanged( self, event ):
+		selected_index = self.m_choiceUseWordColor.GetSelection()
+		self.m_colourPickerUseWordColor.Show(selected_index==1)
+		self.m_textCtrlUseWordColor.Show(selected_index==1)
+		self.m_checkBoxAddRandomColor.Show(selected_index==1)
+		if event: event.Skip()
+
+	def OnWordColorChanged( self, event ):
+		self.colorPicker2Ctrl(self.m_colourPickerUseWordColor, self.m_textCtrlUseWordColor)
+		event.Skip()
+
+	def OnWordFontTextBoxChanged( self, event ):
+		self.ctrl2ColorPicker(self.m_textCtrlUseWordColor, self.m_colourPickerUseWordColor)
+		event.Skip()
+
+	def OnWordFontChoiceChanged( self, event ):
+		if not self.fonts_view_dlg:
+			self.fonts_view_dlg = MyDialogFontView (self)
+
+		self.fonts_view_dlg.ShowModal()
+		#print 'font path: ', self.wc_font_path
+		
+		event.Skip()
+		
+	def OpenWordViewDlg( self, event ):
+		if not self.words_view_dlg:
+			self.words_view_dlg = MyDialogWords (self)
+		self.words_view_dlg.ShowModal()		
+		self.toggleWordsStatus()
+		
+		event.Skip()
+
+	def OnWordFontChanged( self, event ):
+		event.Skip()
+
+	def OnWordFileMaskChanged( self, event ):
+		mask_file_path = self.m_filePickerMaskFile.GetPath()
+		if mask_file_path:
+			self.m_filePickerMaskFile.SetPath(mask_file_path)
+			self.wc_mask = np.array (Image.open(mask_file_path).convert('RGBA'))
+			self.m_filePickerMaskFile.SetToolTipString(self.m_filePickerMaskFile.GetPath())
+		event.Skip()
+		
+	def OnUseMaskChoiceChanged( self, event ):
+		selected_index = self.m_choiceUseMask.GetSelection()
+		self.m_filePickerMaskFile.Show(selected_index==2)
+		if selected_index == 0:
+			self.wc_mask = None
+		elif selected_index == 1:
+			if self.cur_im:
+				self.wc_mask = np.array(self.cur_im)
+			else:
+				self.wc_mask = np.array(Image.open(self.parent.getCurJpg()).convert("RGBA"))
+		else: # use custom mask
+			self.m_filePickerMaskFile.Show(True)
 		event.Skip()
 	
 	def OnPreview( self, event ):
@@ -2135,11 +2369,38 @@ class MyJPGWorkDlg ( wx.Dialog ):
 				self.cur_im = slice_gone(self.cur_im, y1, y2, False)
 			else: 
 				self.cur_im = slice_gone(self.cur_im, x1, x2, True)
+				
+	def MakeWordCloud(self):
+		if not self.wc_words:
+			wx.MessageBox(u"友情提示！词库尚未加载。", u"小提醒", wx.OK | wx.ICON_INFORMATION)
+			return	
+
+		if self.m_choiceUseMask.GetSelection()==2 and (not os.path.exists(self.m_filePickerMaskFile.GetPath())):
+			wx.MessageBox(u"友情提示！自定义蒙版图片尚未指定。", u"小提醒", wx.OK | wx.ICON_INFORMATION)
+			return
+		index = self.m_choiceUseMask.GetSelection()
+
+		if self.m_choiceUseMask.GetSelection()==2:
+			try:
+				self.wc_mask = np.array(Image.open(self.m_filePickerMaskFile.GetPath()).convert("RGBA"))
+			except:
+				wx.MessageBox(u"抱歉！打开蒙版图片时出错，请再试。", "小提醒", wx.OK | wx.ICON_INFORMATION) 
+		wc_bg_color = (None if self.m_choiceBgColor.GetSelection()==0 else self.getColor(self.m_textCtrlWordbg))
+		wc_enable_random_color = self.m_checkBoxAddRandomColor.IsShown() and self.m_checkBoxAddRandomColor.IsChecked()
+		wc_font_color = ((255, 0, 0, 255) if self.m_choiceUseWordColor.GetSelection()==0 else self.getColor(self.m_textCtrlUseWordColor))
+		wc_is_font_default = self.m_choiceUseDefaultFont.GetSelection()==0
+		if wc_is_font_default:
+			self.wc_font_path = u'c:/windows/Fonts/simhei.ttf' if os.path.exists(u'c:/windows/Fonts/simhei.ttf') else u'c:\windows\fonts\tahoma.ttf'
+		wc_allow_numbers = self.m_checkBoxAllowNumber.IsChecked()
+		wc_stop_words = re.findall(r"\w[\w']+", self.wc_custom_stops)
+		wc_scale = self.m_spinCtrlWordScale.GetValue( )
+		
+		self.cur_im = generate_word_cloud(self.wc_words, self.wc_font_path, (wc_font_color, wc_enable_random_color), wc_bg_color, wc_stop_words, self.wc_mask, wc_allow_numbers, wc_scale, False)
+		
 			
 	def MakeWaterMark (self):
 		#img = self.parent.getCurJpg()
-		img = self.cur_img
-		self.cur_im = self.parent.txtDlg.DoWaterMark(img, self.cur_im)
+		self.cur_im = self.parent.txtDlg.DoWaterMark(self.cur_img, self.cur_im)
 		
 	def OnMixColorChanged (self, event):
 		self.colorPicker2Ctrl(self.m_MixColourPicker, self.ctrlColor)
@@ -2215,6 +2476,7 @@ class MyJPGWorkDlg ( wx.Dialog ):
 		color_new = self.getColor(self.ctrlNewColor)
 		flag = self.m_ColorCompareBox.GetValue()
 		w, h = self.cur_im.size
+
 		im_array = np.array(self.cur_im.convert("RGBA"))
 		if self.parent.rubber.crop:
 			x1,y1,x2,y2 = self.parent.rubber.crop
@@ -2307,7 +2569,7 @@ class MyTextDialog(wx.Dialog):
                 self.fName = unicode("宋体", "cp936")
                 self.LABEL_FONT = wx.Font(9, wx.SWISS, wx.NORMAL, wx.NORMAL, False,'Tahoma')
 
-                wx.Dialog.__init__(self, parent, title='添加文字或图片水印', size=(600, 820), style = wx.DEFAULT_DIALOG_STYLE |wx.MINIMIZE_BOX )
+                wx.Dialog.__init__(self, parent, title=u'添加文字或图片水印', size=(600, 820), style = wx.DEFAULT_DIALOG_STYLE |wx.MINIMIZE_BOX )
                 self.SetIcon(self.parent.midi)                
                 
                 self.sizer = wx.BoxSizer(wx.VERTICAL)
@@ -2380,7 +2642,7 @@ class MyTextDialog(wx.Dialog):
                       style=wx.TE_MULTILINE,
                       value=self.text)
                 self.waterText.SetMaxLength(400)
-                self.waterText.SetToolTipString("最多200个汉字")
+                self.waterText.SetToolTipString(u"最多200个汉字")
                 self.waterText.Bind(wx.EVT_TEXT, self.OnWaterText)
                 self.bSizerSrcWaterMark.Add(self.waterText, 0, wx.ALL | wx.CENTER, 2)
                 
@@ -2393,7 +2655,7 @@ class MyTextDialog(wx.Dialog):
                 self.statusSizer.Add(self.fontStatusLabel, 0, wx.TOP | wx.LEFT, 5)
                 
                 #选择字体                
-                self.chooseFont = wx.Button(self, label = "更改当前字体")
+                self.chooseFont = wx.Button(self, label = u"更改当前字体")
                 self.chooseFont.SetFont(self.LABEL_FONT)
                 self.Bind(wx.EVT_BUTTON, self.OnChooseFont, self.chooseFont)
                 self.statusSizer.Add(self.chooseFont, 0, wx.TOP |wx.LEFT | wx.BOTTOM, 5)
@@ -2402,7 +2664,7 @@ class MyTextDialog(wx.Dialog):
                 self.waterPanelSizer = wx.BoxSizer(wx.HORIZONTAL)
                 
                 #水印位置面板				
-                self.waterPosition = wx.StaticBox(self, label='水印位置', size=wx.Size(220, 180))
+                self.waterPosition = wx.StaticBox(self, label=u'水印位置', size=wx.Size(220, 180))
                 self.waterPosition.SetFont(self.LABEL_FONT)
                 self.btnGroupBoxSizer = wx.StaticBoxSizer(self.waterPosition, wx.VERTICAL)
                 #self.waterPanelSizer.Add(self.waterPosition, 0, wx.LEFT, 8)
@@ -2410,23 +2672,23 @@ class MyTextDialog(wx.Dialog):
                 gSizerBtnGroup = wx.GridSizer( 3, 3, 0, 0 )
                 
                 #水印位置9个
-                self.LeftTop = wx.RadioButton(self, label='左上', pos = wx.DefaultPosition, style = wx.RB_GROUP)
+                self.LeftTop = wx.RadioButton(self, label=u'左上', pos = wx.DefaultPosition, style = wx.RB_GROUP)
                 self.LeftTop.Bind(wx.EVT_RADIOBUTTON, self.OnRadioButton)
-                self.CenterTop = wx.RadioButton(self, label='中上', pos = wx.DefaultPosition)
+                self.CenterTop = wx.RadioButton(self, label=u'中上', pos = wx.DefaultPosition)
                 self.CenterTop.Bind(wx.EVT_RADIOBUTTON, self.OnRadioButton)
-                self.RightTop = wx.RadioButton(self, label='右上', pos = wx.DefaultPosition)
+                self.RightTop = wx.RadioButton(self, label=u'右上', pos = wx.DefaultPosition)
                 self.RightTop.Bind(wx.EVT_RADIOBUTTON, self.OnRadioButton)
-                self.LeftCenter = wx.RadioButton(self, label='左中', pos = wx.DefaultPosition)
+                self.LeftCenter = wx.RadioButton(self, label=u'左中', pos = wx.DefaultPosition)
                 self.LeftCenter.Bind(wx.EVT_RADIOBUTTON, self.OnRadioButton)
-                self.Center = wx.RadioButton(self, label='正中', pos = wx.DefaultPosition)
+                self.Center = wx.RadioButton(self, label=u'正中', pos = wx.DefaultPosition)
                 self.Center.Bind(wx.EVT_RADIOBUTTON, self.OnRadioButton)
-                self.RightCenter = wx.RadioButton(self, label='右中', pos = wx.DefaultPosition)
+                self.RightCenter = wx.RadioButton(self, label=u'右中', pos = wx.DefaultPosition)
                 self.RightCenter.Bind(wx.EVT_RADIOBUTTON, self.OnRadioButton)
-                self.LeftBotm = wx.RadioButton(self, label='左下', pos = wx.DefaultPosition)
+                self.LeftBotm = wx.RadioButton(self, label=u'左下', pos = wx.DefaultPosition)
                 self.LeftBotm.Bind(wx.EVT_RADIOBUTTON, self.OnRadioButton)
-                self.CenterBotm = wx.RadioButton(self, label='中下', pos = wx.DefaultPosition)
+                self.CenterBotm = wx.RadioButton(self, label=u'中下', pos = wx.DefaultPosition)
                 self.CenterBotm.Bind(wx.EVT_RADIOBUTTON, self.OnRadioButton)
-                self.RightBotm = wx.RadioButton(self, label='右下', pos = wx.DefaultPosition)                
+                self.RightBotm = wx.RadioButton(self, label=u'右下', pos = wx.DefaultPosition)                
                 self.RightBotm.Bind(wx.EVT_RADIOBUTTON, self.OnRadioButton)
                 
                 self.NineBtns = [self.LeftTop, self.CenterTop, self.RightTop, self.LeftCenter, self.Center, self.RightCenter,
@@ -2440,7 +2702,7 @@ class MyTextDialog(wx.Dialog):
                 self.fontEffectSizer = wx.BoxSizer(wx.VERTICAL)
                 
                 #字体效果设置
-                self.textRepeat = wx.StaticText(self, label='水印重复次数:')
+                self.textRepeat = wx.StaticText(self, label=u'水印重复次数:')
                 self.textRepeat.SetFont(self.LABEL_FONT)
                 self.repeatList = [u'一次 -> 按左边水印位置', u'一次 -> 按鼠标指定位置', u'多次']#, u'最多']                
                 # 加载重复次数字符串
@@ -2453,13 +2715,13 @@ class MyTextDialog(wx.Dialog):
                 self.fontEffectSizer.Add((10, -1))
                 
                 #不透明度 
-                self.pickTrans = wx.StaticText(self, label='不透明度(0~100):')
+                self.pickTrans = wx.StaticText(self, label=u'不透明度(0~100):')
                 self.pickTrans.SetFont(self.LABEL_FONT)
                 self.transCtrl = wx.Slider(self, maxValue=100, minValue=0, size = (160, -1),
                         style=wx.SL_HORIZONTAL|wx.SL_LABELS, value = self.parent.text_trans)
                 
                 # 旋转
-                self.textRotate = wx.StaticText(self, label = '旋转角度(0~360):')
+                self.textRotate = wx.StaticText(self, label = u'旋转角度(0~360):')
                 self.textRotate.SetFont(self.LABEL_FONT)
                 value = self.parent.water_text_angle
                 self.textRotateCtrl = wx.Slider(self, maxValue=360, minValue=0, size = (160, -1),
@@ -2547,8 +2809,8 @@ class MyTextDialog(wx.Dialog):
         #---------------------------------------------------------
                
         def onPicBrowse(self, event):
-                wildcard = "所有文件 (*.*)|*.*|JPEG 图片 (*.jpg)|*.jpg|BMP 图片 (*.bmp)|*.bmp|PNG 图片 (*.png)|*.png|" +\
-                        "GIF 图片 (*.gif)|*.gif|TIF 图片 (*.tif; *.tiff)|*.tif; *.tiff|ICO 图标 (*.ico)|*.ico" 
+                wildcard = u"所有文件 (*.*)|*.*|JPEG 图片 (*.jpg)|*.jpg|BMP 图片 (*.bmp)|*.bmp|PNG 图片 (*.png)|*.png|" +\
+                        u"GIF 图片 (*.gif)|*.gif|TIF 图片 (*.tif; *.tiff)|*.tif; *.tiff|ICO 图标 (*.ico)|*.ico" 
                         
                 fd = wx.FileDialog(self, u'请选择一张水印图片', os.getcwd(), '', wildcard, wx.FD_CHANGE_DIR | wx.OPEN)
                 if fd.ShowModal() == wx.ID_OK:
@@ -2559,7 +2821,7 @@ class MyTextDialog(wx.Dialog):
                 event.Skip()
                 
         def onFileListBrowse (self, event):
-                wildcard = "文本文件 (*.txt)|*.txt|Excel文件 (*.xlsx)|*.xlsx|所有文件 (*.*)|*.*"                 
+                wildcard = u"文本文件 (*.txt)|*.txt|Excel文件 (*.xlsx)|*.xlsx|所有文件 (*.*)|*.*"                 
                 if self.m_fileListCtrlPath.GetValue() != "": initDir = os.path.dirname(self.m_fileListCtrlPath.GetValue())
                 else: initDir = os.getcwd()
                 
@@ -2601,17 +2863,17 @@ class MyTextDialog(wx.Dialog):
         def CheckListFiles(self, rows, filein):
                 if  rows == len(self.parent.picPaths):                        
                         if True in [ (len(j) > 200 ) for j in self.listFile]:
-                                wx.MessageBox("列表中有的水印字数超出限制，请检查文件。", "小提醒", wx.OK | wx.ICON_INFORMATION)
+                                wx.MessageBox(u"列表中有的水印字数超出限制，请检查文件。", u"小提醒", wx.OK | wx.ICON_INFORMATION)
                                 self.listFile = None
                                 self.m_fileListCtrlPath.Clear()
                         else:
                                 self.m_fileListCtrlPath.SetValue(filein)
                                 self.m_fileListCtrlPath.SetToolTip(wx.ToolTip(filein))                                               
                 else:
-                        error = '图片总数( %s )与载入列表( %s )不匹配！请重试。' % (len(self.parent.picPaths), rows)
+                        error = u'图片总数( %s )与载入列表( %s )不匹配！请重试。' % (len(self.parent.picPaths), rows)
                         self.listFile = None
                         self.m_fileListCtrlPath.Clear()
-                        wx.MessageBox(error, "小提醒", wx.OK | wx.ICON_INFORMATION)
+                        wx.MessageBox(error, u"小提醒", wx.OK | wx.ICON_INFORMATION)
                         
                         
                 
@@ -2785,7 +3047,7 @@ class MyTextDialog(wx.Dialog):
                         imgTop.rotate(ANGLE) 
                         textwidth, textheight = imgTop.size
                         if (textwidth > self.parent.W or textheight > self.parent.H):
-                                wx.MessageBox("您选择的图片太大了！请缩小尺寸后再试。", "小提醒", wx.OK | wx.ICON_INFORMATION)
+                                wx.MessageBox(u"您选择的图片太大了！请缩小尺寸后再试。", u"小提醒", wx.OK | wx.ICON_INFORMATION)
                                 return
                 except:  return
                 
@@ -2812,7 +3074,7 @@ class MyTextDialog(wx.Dialog):
                                 scale = self.parent.scale
                                 xy = (int(left.x * scale), int(left.y * scale))
                         else:
-                                wx.MessageBox("您还没有指定水印位置呢:-)。", "小提醒", wx.OK | wx.ICON_INFORMATION)
+                                wx.MessageBox(u"您还没有指定水印位置呢:-)。", u"小提醒", wx.OK | wx.ICON_INFORMATION)
                                 isPosSet = False
                                 xy = None
                 else: 
@@ -3046,3 +3308,219 @@ class ShowListDlg ( wx.Dialog ):
                         self.m_listCtrlImgList.SetStringItem(self.index, 1, fname)
                         self.m_listCtrlImgList.SetStringItem(self.index, 2, path)
                         self.index += 1
+
+###########################################################################
+## Class MyDialogFontView
+###########################################################################
+
+class MyDialogFontView ( wx.Dialog ):
+
+	def __init__( self, parent ):
+		wx.Dialog.__init__ ( self, parent, id = wx.ID_ANY, title = u" 请从列表中选择一种字体", pos = wx.DefaultPosition, size = wx.Size( 661,684 ), style = wx.DEFAULT_DIALOG_STYLE|wx.MAXIMIZE_BOX|wx.MINIMIZE_BOX | wx.RESIZE_BORDER )
+
+		#self.SetSizeHints( wx.DefaultSize, wx.DefaultSize )
+
+		bSizerFontMain = wx.BoxSizer( wx.VERTICAL )
+
+		sbSizerFontList = wx.StaticBoxSizer( wx.StaticBox( self, wx.ID_ANY, u"字体列表" ), wx.VERTICAL )
+
+		sbSizerFontList.SetMinSize( wx.Size( 400,-1 ) )
+		self.m_listCtrlFontList = wx.ListCtrl( sbSizerFontList.GetStaticBox(), wx.ID_ANY, wx.DefaultPosition, wx.Size(-1, 400), wx.BORDER_SUNKEN|wx.LC_REPORT )
+		self.m_listCtrlFontList.InsertColumn(0, u'编号')                
+		self.m_listCtrlFontList.InsertColumn(1, u'字体名称', width = 100)
+		self.m_listCtrlFontList.InsertColumn(2, u'字体路径', width = 800)
+		sbSizerFontList.Add( self.m_listCtrlFontList, 1, wx.ALL|wx.EXPAND, 5 )
+		
+		# get font list
+		import matplotlib.font_manager as fontman
+		self.font_list = fontman.findSystemFonts()
+		
+		self.index = 0
+		self.selected_index = -1
+		self.selected_font_path = None
+		
+		self.font_list.sort(key = lambda x : os.path.basename(x))
+		
+		for font_path in self.font_list:
+			self.m_listCtrlFontList.InsertStringItem(self.index, '%i' % (self.index + 1))
+			font_name = os.path.splitext(os.path.basename(font_path))[0]
+			self.m_listCtrlFontList.SetStringItem(self.index, 1, font_name)
+			self.m_listCtrlFontList.SetStringItem(self.index, 2, font_path)
+			self.index += 1
+
+
+		bSizerFontMain.Add( sbSizerFontList, 5, wx.EXPAND, 5 )
+
+		sbSizerFontPreview = wx.StaticBoxSizer( wx.StaticBox( self, wx.ID_ANY, u"字体预览" ), wx.VERTICAL )
+
+		# WARNING: wxPython code generation isn't supported for this widget yet.
+		#self.m_scintillaFontPreview = wx.Window( sbSizerFontPreview.GetStaticBox() )
+		self.previewText = wx.TextCtrl(id=wx.ID_ANY, name='previewText',
+		      parent=self, pos=wx.Point(88, 64), size=wx.Size(-1, 100),
+		      style=wx.TE_MULTILINE,
+		      value=u'在生成词云效果之前,请指定一种字体\r\nPlease specify a font to generate Word Cloud Effect ')
+		sbSizerFontPreview.Add( self.previewText, 0, wx.EXPAND |wx.ALL, 5 )
+
+
+		bSizerFontMain.Add( sbSizerFontPreview, 0, wx.EXPAND, 5 )
+
+		m_sdbSizerFontButtons = wx.StdDialogButtonSizer()
+		self.m_sdbSizerFontButtonsSave = wx.Button( self, wx.ID_SAVE )
+		m_sdbSizerFontButtons.AddButton( self.m_sdbSizerFontButtonsSave )
+		self.m_sdbSizerFontButtonsCancel = wx.Button( self, wx.ID_CANCEL )
+		m_sdbSizerFontButtons.AddButton( self.m_sdbSizerFontButtonsCancel )
+		m_sdbSizerFontButtons.Realize();
+		m_sdbSizerFontButtons.SetMinSize(wx.Size(-1, 20) )
+
+		bSizerFontMain.Add( m_sdbSizerFontButtons, 1, wx.EXPAND, 5 )
+		
+
+
+		self.SetSizer( bSizerFontMain )
+		self.Layout()
+
+		self.Centre( wx.BOTH )
+
+		# Connect Events
+		self.Bind( wx.EVT_INIT_DIALOG, self.OnInitFontsDlg )
+		self.m_listCtrlFontList.Bind( wx.EVT_LIST_ITEM_SELECTED, self.OnListItemSelected)
+		self.m_listCtrlFontList.Bind( wx.EVT_LIST_ITEM_DESELECTED, self.OnListItemDeselected)
+		self.m_sdbSizerFontButtonsSave.Bind( wx.EVT_BUTTON, self.OnFontApplyButtonClick )
+		self.m_sdbSizerFontButtonsCancel.Bind( wx.EVT_BUTTON, self.OnFontCancelButtonClick )
+		
+		# Select first item
+		if self.font_list:
+			self.m_listCtrlFontList.Focus(0)
+			self.m_listCtrlFontList.Select(0)
+			self.OnListItemSelected(None)
+
+	def __del__( self ):
+		pass
+
+
+	# Virtual event handlers, overide them in your derived class
+	def OnInitFontsDlg( self, event ):
+		event.Skip()
+		
+	def OnListItemSelected( self, event ):
+		self.selected_index = event.Index if event else 0
+		selected_item_name = self.m_listCtrlFontList.GetItem(itemId=self.selected_index, col=1)
+		selected_font = wx.Font(18, wx.MODERN, wx.NORMAL, wx.NORMAL, False,  selected_item_name.GetText())
+		selected_item_path = self.m_listCtrlFontList.GetItem(itemId=self.selected_index, col=2)
+		self.selected_font_path = selected_item_path.GetText()
+		#print 'child path: ', self.selected_font_path
+		self.previewText.SetFont(selected_font)
+		if event: event.Skip()
+	def OnListItemDeselected( self, event ):
+		self.m_sdbSizerFontButtonsSave.Enable()
+		event.Skip()
+
+	def OnFontApplyButtonClick( self, event ):
+		self.Parent.wc_font_path = self.selected_font_path
+		self.m_sdbSizerFontButtonsSave.Enable(False)
+		event.Skip()
+
+	def OnFontCancelButtonClick( self, event ):
+		event.Skip()
+		
+###########################################################################
+## Class MyDialogWords
+###########################################################################
+
+class MyDialogWords ( wx.Dialog ):
+
+	def __init__( self, parent ):
+		wx.Dialog.__init__ ( self, parent, id = wx.ID_ANY, title = u"自定义词库", pos = wx.DefaultPosition, size = wx.Size( 780,650 ), style = wx.DEFAULT_DIALOG_STYLE|wx.MAXIMIZE_BOX|wx.MINIMIZE_BOX|wx.RESIZE_BORDER )
+
+		self.SetSizeHints( 550,500 )
+
+		bSizerWords = wx.BoxSizer( wx.VERTICAL )
+
+		sbSizerBrowseWordFile = wx.StaticBoxSizer( wx.StaticBox( self, wx.ID_ANY, u"" ), wx.HORIZONTAL )
+
+		self.m_staticTextBrowseWordFile = wx.StaticText( sbSizerBrowseWordFile.GetStaticBox(), wx.ID_ANY, u"从文本文件加载", wx.DefaultPosition, wx.Size( -1,-1 ), 0 )
+		self.m_staticTextBrowseWordFile.Wrap( -1 )
+
+		sbSizerBrowseWordFile.Add( self.m_staticTextBrowseWordFile, 0, wx.ALL, 5 )
+
+		self.m_filePickerBrowseWordFile = wx.FilePickerCtrl( sbSizerBrowseWordFile.GetStaticBox(), wx.ID_ANY, wx.EmptyString, u"从文本文件加载词库", u"*.txt", wx.DefaultPosition, wx.DefaultSize, wx.FLP_DEFAULT_STYLE|wx.FLP_FILE_MUST_EXIST|wx.FLP_SMALL )
+		sbSizerBrowseWordFile.Add( self.m_filePickerBrowseWordFile, 1, wx.ALL, 5 )
+
+
+		bSizerWords.Add( sbSizerBrowseWordFile, 0, wx.EXPAND, 5 )
+
+		sbSizerCurrentWords = wx.StaticBoxSizer( wx.StaticBox( self, wx.ID_ANY, u"当前词库 (可以复制/粘贴词库到窗口)" ), wx.VERTICAL )
+
+		# WARNING: wxPython code generation isn't supported for this widget yet.
+		# self.m_scintillaCurrentWords = wx.Window( sbSizerCurrentWords.GetStaticBox() )
+		self.m_current_words = wx.TextCtrl(sbSizerCurrentWords.GetStaticBox(), wx.ID_ANY, wx.EmptyString,
+		      wx.DefaultPosition, wx.DefaultSize, wx.TE_MULTILINE)
+		sbSizerCurrentWords.Add( self.m_current_words, 2, wx.EXPAND |wx.ALL, 5 )
+
+
+		bSizerWords.Add( sbSizerCurrentWords, 2, wx.EXPAND, 5 )
+
+		sbSizerWordsStop = wx.StaticBoxSizer( wx.StaticBox( self, wx.ID_ANY, u"忽略词库" ), wx.VERTICAL )
+
+		# WARNING: wxPython code generation isn't supported for this widget yet.
+		# self.m_scintillaWordStop = wx.Window( sbSizerWordsStop.GetStaticBox() )
+		self.m_stop_words = wx.TextCtrl(sbSizerWordsStop.GetStaticBox(), wx.ID_ANY, wx.EmptyString,
+		      wx.DefaultPosition, wx.DefaultSize, wx.TE_MULTILINE)
+		sbSizerWordsStop.Add( self.m_stop_words, 1, wx.EXPAND |wx.ALL, 5 )
+
+
+		bSizerWords.Add( sbSizerWordsStop, 1, wx.EXPAND, 5 )
+
+		m_sdbSizerWordButtons = wx.StdDialogButtonSizer()
+		self.m_sdbSizerWordButtonsSave = wx.Button( self, wx.ID_SAVE )
+		m_sdbSizerWordButtons.AddButton( self.m_sdbSizerWordButtonsSave )
+		self.m_sdbSizerWordButtonsCancel = wx.Button( self, wx.ID_CANCEL )
+		m_sdbSizerWordButtons.AddButton( self.m_sdbSizerWordButtonsCancel )
+		m_sdbSizerWordButtons.Realize();
+
+		bSizerWords.Add( m_sdbSizerWordButtons, 1, wx.EXPAND, 5 )
+
+
+		self.SetSizer( bSizerWords )
+		self.Layout()
+
+		self.Centre( wx.BOTH )
+
+		# Connect Events
+		self.m_filePickerBrowseWordFile.Bind( wx.EVT_FILEPICKER_CHANGED, self.OnFileChangedForWords )
+		self.m_current_words.Bind( wx.EVT_TEXT, self.OnTextChanged )
+		self.m_stop_words.Bind( wx.EVT_TEXT, self.OnTextChanged )
+		self.m_sdbSizerWordButtonsCancel.Bind( wx.EVT_BUTTON, self.OnCancelWords )
+		self.m_sdbSizerWordButtonsSave.Bind( wx.EVT_BUTTON, self.OnSaveWords )
+
+	def __del__( self ):
+		pass
+
+
+	# Virtual event handlers, overide them in your derived class
+	def OnFileChangedForWords( self, event ):
+		words_file_path = self.m_filePickerBrowseWordFile.GetPath()
+		if words_file_path:
+			self.m_filePickerBrowseWordFile.SetPath(words_file_path)
+			try:
+				with open(words_file_path, 'rb') as f:
+					words = f.read().decode('utf-16-le')
+					text = words.encode('cp936','ignore')
+					self.m_current_words.SetValue(text)
+				self.m_filePickerBrowseWordFile.SetToolTipString(words_file_path)
+			except Exception, e:
+				file_open_error = u'打开文件时出错: {}'.format(str(e))
+		event.Skip()
+
+	def OnCancelWords( self, event ):
+		event.Skip()
+
+	def OnSaveWords( self, event ):
+		self.Parent.wc_words = self.m_current_words.GetValue()
+		self.Parent.wc_custom_stops = self.m_stop_words.GetValue()
+		self.m_sdbSizerWordButtonsSave.Enable(False)
+		event.Skip()
+		
+	def OnTextChanged( self, event ):
+		self.m_sdbSizerWordButtonsSave.Enable(True)
+		event.Skip()
