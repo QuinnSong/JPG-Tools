@@ -1,7 +1,7 @@
 # -*- coding: cp936 -*- 
 import wx
 import iconfile
-#from time import sleep
+
 ###########################################################################
 ## Class MyAboutDialog
 ## Credit to Mike for his "Doing a Fade-in with wxPython"
@@ -23,11 +23,11 @@ class MyAboutDialog ( wx.Dialog ):
 		
 		bSizerDescription = wx.BoxSizer( wx.VERTICAL )
 		
-		self.m_staticTextProduct = wx.StaticText( self, wx.ID_ANY, u"软件名称：JPG图片工具", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_staticTextProduct = wx.StaticText( self, wx.ID_ANY, u"软件名称：JPGTools", wx.DefaultPosition, wx.DefaultSize, 0 )
 		self.m_staticTextProduct.Wrap( -1 )
 		bSizerDescription.Add( self.m_staticTextProduct, 0, wx.ALL, 5 )
 		
-		self.m_staticTextVersion = wx.StaticText( self, wx.ID_ANY, u"软件版本：0.93", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_staticTextVersion = wx.StaticText( self, wx.ID_ANY, u"软件版本：1.0.0", wx.DefaultPosition, wx.DefaultSize, 0 )
 		self.m_staticTextVersion.Wrap( -1 )
 		bSizerDescription.Add( self.m_staticTextVersion, 0, wx.ALL, 5 )
 		

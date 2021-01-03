@@ -1,14 +1,13 @@
 #-*- coding: cp936 -*-
 # ----------------------------------------
 # image_viewer.py
-# Recompiled 08-12-2016
+# Recompiled 12-28-2020
 # Author: Quinn
 # ----------------------------------------
 
 import glob
 import os, sys, re
 import wx
-from installed_progs import appDetect
 from wx.lib.pubsub import pub
 import math
 from threading import Thread
@@ -20,8 +19,16 @@ from command_line import cmd
 import getopt
 import iconfile
 import codecs
+import subprocess
 from shadow import reduce_opacity, put_alpha
-from qrtools import QR
+
+# ===== custom environment vars section starts========
+exepath = unicode(os.path.dirname(sys.path[0]), 'cp936')
+magick_home = os.path.join(exepath, 'imagic')
+os.environ['PATH'] += ';' + magick_home
+os.environ['MAGICK_HOME'] = magick_home
+os.environ['MAGICK_CODER_MODULE_PATH'] = magick_home + os.sep + 'modules' + os.sep + 'coders'
+# ===== custom environment vars section ends ==========
 
 # ===== try to import wand ==================
 try:
@@ -34,9 +41,11 @@ try:
         from converter import PicConverter
         from QRDlg import MyQRDialog
         from qrtools import QR
+        
 except ImportError:
 	HAS_WAND = False
-# ===== end of try ========================
+	
+# ===== end of import try ===================
 
 from PIL.PngImagePlugin import PngImageFile
 
@@ -59,7 +68,6 @@ REGDATA = u"""Windows Registry Editor Version 5.00\r\n\r\n
 @="XX \\"%1\\""
 """
 ################ Add to right-click menu ######################
-exepath = unicode(os.path.dirname(sys.path[0]), 'cp936')
 REGFILE = os.path.join(exepath, u'添加此工具到右键菜单.reg')
 ###############################################################
 
@@ -1470,7 +1478,7 @@ class ViewerFrame(wx.Frame):
         def __init__(self):
                 """Constructor"""
                 
-                wx.Frame.__init__(self, None, title=u"JPG图片工具 0.93", style = wx.CAPTION|wx.CLOSE_BOX|wx.MINIMIZE_BOX|wx.SYSTEM_MENU|wx.TAB_TRAVERSAL)
+                wx.Frame.__init__(self, None, title=u"JPGTools 1.0.0", style = wx.CAPTION|wx.CLOSE_BOX|wx.MINIMIZE_BOX|wx.SYSTEM_MENU|wx.TAB_TRAVERSAL)
                 global midi, splash ## define variable icon
 
                 self.panel = ViewerPanel(self)
@@ -1634,7 +1642,7 @@ class ViewerFrame(wx.Frame):
         
         def OnMode (self, event):
                 if self.panel.imageLabel.GetLabel().startswith( u'(预览)未命名.png'):
-                        pub.sendMessage("set status", msg = "请先保存二维码图片，再进行此操作。")
+                        pub.sendMessage("set status", msg = u"请先保存二维码图片，再进行此操作。")
                         self.mode_btn.SetValue(False)
                 else:
                         self.panel.singleMode = self.mode_btn.GetValue()
@@ -1835,10 +1843,10 @@ class ViewerFrame(wx.Frame):
                 if not self.panel.im_preview and not self.panel.getCurJpg():
                         pub.sendMessage("set status", msg = u"没有图片可以保存，当前操作已取消。")
                 else:
-                        wildcard = "JPEG 图片 (*.jpg)|*.jpg|BMP 图片 (*.bmp)|*.bmp|PNG 图片 (*.png)|*.png|" +\
-                                "GIF 图片 (*.gif)|*.gif|TIF 图片 (*.tif; *.tiff)|*.tif; *.tiff" 
+                        wildcard = u"JPEG 图片 (*.jpg)|*.jpg|BMP 图片 (*.bmp)|*.bmp|PNG 图片 (*.png)|*.png|" +\
+                                u"GIF 图片 (*.gif)|*.gif|TIF 图片 (*.tif; *.tiff)|*.tif; *.tiff" 
                                 
-                        dlg = wx.FileDialog(self, "文件另存为", self.panel.save_dir, "", wildcard, \
+                        dlg = wx.FileDialog(self, u"文件另存为", self.panel.save_dir, "", wildcard, \
                                             wx.SAVE|wx.OVERWRITE_PROMPT)
                         result = dlg.ShowModal()
                         fileIn = dlg.GetPath()
@@ -1857,6 +1865,8 @@ class ViewerFrame(wx.Frame):
                                         if self.panel.imageLabel.GetLabelText().startswith(u"(预览)未命名.png" ):
                                                 # load the QR image
                                                 pub.sendMessage("update images", msg = [ fileIn ])
+                                        # open saved folder in explorer
+                                        subprocess.Popen(ur'explorer /select, "{}"'.format(fileIn))
 
                         elif result == wx.ID_CANCEL:    #Either the cancel button was pressed or the window was closed
                                 pass
@@ -1931,7 +1941,7 @@ class ListPrepDialog(wx.Dialog):
         #-------------------------------------------------------------
         def __init__(self, parent):
                 """Constructor"""
-                wx.Dialog.__init__(self, parent, title='正在准备文件列表。请稍候...', size=(350, 120))
+                wx.Dialog.__init__(self, parent, title=u'正在准备文件列表。请稍候...', size=(350, 120))
                 self.SetIcon(midi)
                 
                 self.count = 0
@@ -1985,7 +1995,7 @@ class MyProgressDialog(wx.Dialog):
         def __init__(self, parent):
                 """Constructor"""
                 self.parent = parent
-                wx.Dialog.__init__(self, parent, title='正在处理图片文件列表。请稍候...', size=(350, 120))
+                wx.Dialog.__init__(self, parent, title=u'正在处理图片文件列表。请稍候...', size=(350, 120))
                 self.SetIcon(midi)
                 
                 self.count = 0
@@ -2308,9 +2318,12 @@ if __name__ == "__main__":
                 app = wx.App(False)
                 
                 # check if wand imported properly
-                MSG = appDetect('ImageMagick', 'ImageMagick', 'convert.exe')
-                if not (HAS_WAND or HAS_WAND) and MSG:                        
-                        wx.MessageBox(u'警告：' + MSG, u"JPG图片工具", wx.OK | wx.ICON_INFORMATION)
+                HAS_IMAGICK = os.path.exists(os.path.join(exepath, 'imagic', 'convert.exe'))
+                #MSG = appDetect('ImageMagick', 'ImageMagick', 'convert.exe')
+
+                if not (HAS_WAND and HAS_IMAGICK):
+                        MSG = u'系统上未检测到ImageMagick模块。程序即将退出。'
+                        wx.MessageBox(u'警告：' + MSG, u"JPGTools", wx.OK | wx.ICON_INFORMATION)
                         sys.exit()
                 else:
                         # After wx.App is created with can call icon func                

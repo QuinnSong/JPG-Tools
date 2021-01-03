@@ -20,8 +20,12 @@ import ConversionsIcon
 from subprocess import call
 from installed_progs import appDetect
 import re
+import sys
 
 PIC_LIST = ['.JPG', '.JPEG', '.BMP', '.TIF', '.TIFF', '.GIF', '.PNG', '.PSD']
+exepath = unicode(os.path.dirname(sys.path[0]), 'cp936')
+gs_home = os.path.join(exepath, 'gs', 'bin')
+os.environ['PATH'] += ';' + gs_home
 
 ###########################################################################
 ## Class PicConverter
@@ -405,11 +409,11 @@ class PicConverter ( wx.Dialog ):
 		pass
 	
 	def set_tooltip(self):
-		gs_msg = appDetect('Ghostscript', '\\gs\\', 'gswin32c.exe')
-		tooltip = (u'此项功能目前不可用。原因是：\r\n' + gs_msg ) if gs_msg else u"转换选择的PDF到PNG"  
+		gs_exists = os.path.exists(gs_home)
+		tooltip = (u'此项功能目前不可用。原因是：\r\n系统上未检测到Ghost模块' ) if not gs_exists else u"转换选择的PDF到PNG"  
 		self.m_bitmapPdf2.SetToolTipString( tooltip )		
 		self.m_bitmapSingle2.SetToolTipString( tooltip )
-		self.m_checkBoxPdf2Pic.Enable(not gs_msg)
+		self.m_checkBoxPdf2Pic.Enable(gs_exists)
 	
 	def motion(self, event):                
 		self.status.SetToolTipString(self.status.GetStatusText())
